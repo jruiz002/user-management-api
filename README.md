@@ -199,7 +199,30 @@ confirmado. La IP es efímera (se libera al detener la instancia) y se omite aqu
 propósito para no dejar un endpoint público sin autenticación referenciado de forma
 permanente en un repo de GitHub.
 
-## 12. Cómo correr el proyecto
+## 12. Observabilidad (Operate/Observe)
+
+- **`GET /health`**: liveness/readiness check, usado por el `HEALTHCHECK` de Docker y,
+  en el siguiente paso, por un Application Load Balancer o por Kubernetes.
+- **Logs estructurados en JSON** (Pino) a `stdout` — nunca a un archivo, para que
+  cualquier recolector (CloudWatch Logs Agent, Fluent Bit, Loki) los pueda capturar sin
+  cambios de código. Cada request deja un registro con `method`, `path`, `statusCode`
+  y `durationMs`, ya filtrable/queryable por esos campos.
+
+Evidencia real capturada desde la instancia EC2 en producción (`docker logs uma`):
+
+```json
+{"level":"info","time":"2026-06-26T06:50:39.570Z","pid":1,"hostname":"fc930af3ba9b","dbPath":"/app/data/app.db","msg":"database ready"}
+{"level":"info","time":"2026-06-26T06:50:39.577Z","pid":1,"hostname":"fc930af3ba9b","port":"3000","msg":"server started"}
+{"level":"info","time":"2026-06-26T06:51:02.621Z","pid":1,"hostname":"fc930af3ba9b","method":"POST","path":"/users","statusCode":201,"durationMs":2,"msg":"request completed"}
+```
+
+**Próximo paso natural** (no implementado aquí, por alcance): exponer `/metrics` con
+`prom-client` y un Prometheus + Grafana (o CloudWatch Container Insights) scrapeando
+esa instancia, usando exactamente los mismos campos (`statusCode`, `durationMs`) que ya
+se loguean hoy — la base de datos para esos dashboards ya está sentada en este logging,
+solo falta el exporter.
+
+## 13. Cómo correr el proyecto
 
 ```bash
 npm install
