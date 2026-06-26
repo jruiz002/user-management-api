@@ -78,7 +78,7 @@ User {
 
 | Método | Ruta | Descripción | Respuesta |
 |---|---|---|---|
-| GET | `/health` | Liveness/readiness check | `200 { "status": "ok" }` |
+| GET | `/health` | Liveness/readiness check | `200 { "status": "Esta bien" }` |
 | POST | `/users` | Crea usuario (`{ name, email }`) | `201` con el usuario creado / `400` validación / `409` email duplicado |
 | GET | `/users` | Lista todos los usuarios | `200` array de usuarios |
 | GET | `/users/:id` | Obtiene un usuario por id | `200` usuario / `404` no encontrado |
