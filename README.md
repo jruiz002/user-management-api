@@ -114,12 +114,47 @@ User {
 - Autenticación (JWT) y autorización por rol.
 - Dependabot/Renovate para parcheo automático de dependencias.
 
-## 9. Cómo correr el proyecto
+## 9. Contenerización (Build)
+
+`Dockerfile` multi-stage:
+
+- **Stage `deps`**: instala dependencias de producción (`npm ci --omit=dev`). Incluye
+  `python3 make g++` solo en este stage por si `better-sqlite3` necesita compilar
+  desde fuente en alguna plataforma sin binario prebuilt — esas herramientas nunca
+  llegan a la imagen final.
+- **Stage final**: imagen `node:22-slim` (glibc, no alpine) corriendo como usuario
+  no root (`appuser`), con `HEALTHCHECK` nativo basado en `/health` y sin `npm`/`npx`/
+  `corepack` instalados, ya que el contenedor solo ejecuta `node src/server.js`.
+
+**Por qué `slim` y no `alpine`:** `alpine` usa `musl` en vez de `glibc`, lo que en el
+pasado ha causado problemas con binarios prebuilt de módulos nativos como
+`better-sqlite3`. `slim` es más grande (~400MB) pero elimina ese riesgo en una noche
+de tiempo limitado; quedaría como optimización futura evaluar `alpine` o una imagen
+`distroless`.
+
+**Hallazgo real durante el build:** al escanear la primera versión de la imagen con
+Trivy (`trivy image --severity HIGH,CRITICAL`) apareció `CVE-2026-33671` (HIGH) en
+`picomatch`, una dependencia transitiva del propio `npm` que viene empaquetado en la
+imagen base `node:22-slim` — no del código de este proyecto. Como el contenedor en
+producción nunca ejecuta `npm` (solo `node src/server.js`), la corrección fue eliminar
+`npm`/`npx`/`corepack` de la imagen final, reduciendo superficie de ataque además de
+resolver el hallazgo. Re-escaneado, el gate pasa limpio (`exit-code 1` → `0`).
+
+## 10. Cómo correr el proyecto
 
 ```bash
 npm install
 npm test          # corre la suite de Jest + Supertest
 npm start         # levanta el servidor en :3000 (PORT configurable)
+```
+
+Con Docker:
+
+```bash
+docker build -t user-management-api .
+docker volume create uma-data   # persistencia del SQLite entre reinicios
+docker run -d --name uma -p 3000:3000 -v uma-data:/app/data user-management-api
+docker logs -f uma
 ```
 
 Variables de entorno soportadas:
