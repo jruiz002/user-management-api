@@ -1,0 +1,23 @@
+{
+  "name": "user-management-api",
+  "version": "1.0.0",
+  "description": "Simple user management REST API built to practice the full DevSecOps lifecycle (PBL project).",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "jest",
+    "test:coverage": "jest --coverage"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.19.2",
+    "pino": "^9.4.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}
