@@ -154,6 +154,22 @@ resolver el hallazgo. Re-escaneado, el gate pasa limpio (`exit-code 1` → `0`).
    (no en PRs), hace login y push a Docker Hub con dos tags: el SHA del commit y
    `latest`.
 
+**CI vs. CD — qué hace cada job, exactamente:**
+
+- **CI (Continuous Integration) = job `test` completo** (`npm ci` → `npm test` →
+  `npm audit`). Valida el **código fuente**: ¿corre?, ¿pasan los tests?, ¿sus
+  dependencias son seguras? Termina con un veredicto: "este código está bien".
+- **CD (Continuous Delivery) = job `build-scan-push` completo** (build de la imagen →
+  Trivy scan → push a Docker Hub). Las tres partes son una sola idea: empaquetar el
+  código en un artefacto desplegable, verificar que *ese artefacto* también sea
+  seguro, y publicarlo. El scan de Trivy no es CI porque no valida código fuente,
+  valida el paquete final — es el equivalente del `npm audit` pero para la imagen, y
+  por eso vive dentro de "preparar la entrega", no dentro de "integrar código".
+- **Continuous *Deployment*** (un escalón más, que no está implementado en este
+  proyecto) sería automatizar lo que hoy hace `scripts/deploy.sh` a mano: que la EC2
+  reciba la señal, haga `pull` y levante el contenedor nuevo sin que nadie corra el
+  script. Se deja manual a propósito (ver sección [Deploy](#11-deploy-ec2)).
+
 **Por qué dos gates de seguridad distintos:** `npm audit` cubre vulnerabilidades en el
 código/dependencias fuente; Trivy cubre la imagen final (paquetes del SO de la imagen
 base + dependencias). Son superficies distintas — uno no sustituye al otro.
