@@ -140,7 +140,32 @@ producción nunca ejecuta `npm` (solo `node src/server.js`), la corrección fue 
 `npm`/`npx`/`corepack` de la imagen final, reduciendo superficie de ataque además de
 resolver el hallazgo. Re-escaneado, el gate pasa limpio (`exit-code 1` → `0`).
 
-## 10. Cómo correr el proyecto
+## 10. Pipeline CI/CD (Test & Sec)
+
+`.github/workflows/ci-cd.yml`, dos jobs:
+
+1. **`test`** — `npm ci` → `npm test` (Jest/Supertest) → `npm audit --omit=dev --audit-level=high`.
+   Se excluyen `devDependencies` del audit porque las únicas vulnerabilidades actuales
+   del proyecto están en herramientas de testing (cadena de Jest/istanbul → `js-yaml`),
+   que nunca llegan a producción; auditar solo lo que se despliega evita gatear el
+   pipeline por riesgo que no existe en runtime.
+2. **`build-scan-push`** (depende de `test`) — construye la imagen, la escanea con
+   **Trivy** (`HIGH,CRITICAL`, `ignore-unfixed`) y, solo si es un `push` a `main`
+   (no en PRs), hace login y push a Docker Hub con dos tags: el SHA del commit y
+   `latest`.
+
+**Por qué dos gates de seguridad distintos:** `npm audit` cubre vulnerabilidades en el
+código/dependencias fuente; Trivy cubre la imagen final (paquetes del SO de la imagen
+base + dependencias). Son superficies distintas — uno no sustituye al otro.
+
+**Secrets requeridos en el repo de GitHub** (Settings → Secrets and variables → Actions):
+
+| Secret | Uso |
+|---|---|
+| `DOCKERHUB_USERNAME` | Usuario de Docker Hub |
+| `DOCKERHUB_TOKEN` | Access Token de Docker Hub (no la contraseña) |
+
+## 11. Cómo correr el proyecto
 
 ```bash
 npm install
