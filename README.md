@@ -158,6 +158,11 @@ resolver el hallazgo. Re-escaneado, el gate pasa limpio (`exit-code 1` → `0`).
 código/dependencias fuente; Trivy cubre la imagen final (paquetes del SO de la imagen
 base + dependencias). Son superficies distintas — uno no sustituye al otro.
 
+**Supply-chain de las propias GitHub Actions:** `aquasecurity/trivy-action` está fijada
+a un commit SHA (`@ed142fd...  # v0.36.0`) en vez de a un tag mutable. Un tag de un
+repo de terceros se puede re-apuntar a otro commit; un SHA no, así que pinear por SHA
+es la mitigación estándar contra un ataque de supply-chain vía una Action comprometida.
+
 **Secrets requeridos en el repo de GitHub** (Settings → Secrets and variables → Actions):
 
 | Secret | Uso |
