@@ -63,3 +63,14 @@ jobs:
           docker tag "$IMAGE_NAME:${{ github.sha }}" "$IMAGE_NAME:latest"
           docker push "$IMAGE_NAME:${{ github.sha }}"
           docker push "$IMAGE_NAME:latest"
+
+  deploy:
+    name: Deploy to EC2 (Continuous Deployment)
+    needs: build-scan-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, ec2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull latest image and restart container
+        run: ./scripts/deploy-local.sh
