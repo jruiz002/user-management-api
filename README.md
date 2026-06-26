@@ -170,7 +170,36 @@ es la mitigación estándar contra un ataque de supply-chain vía una Action com
 | `DOCKERHUB_USERNAME` | Usuario de Docker Hub |
 | `DOCKERHUB_TOKEN` | Access Token de Docker Hub (no la contraseña) |
 
-## 11. Cómo correr el proyecto
+## 11. Deploy (EC2)
+
+Despliegue manual vía script SSH (`scripts/deploy.sh`), no Terraform — decisión de
+alcance documentada desde el [Plan](#1-alcance-scope), no un olvido.
+
+- **Instancia**: EC2 Amazon Linux 2023, sin Docker preinstalado (se instaló como parte
+  de este despliegue: `dnf install docker`, `systemctl enable --now docker`).
+- **Imagen**: se hace `docker pull` de la misma imagen pública que construyó y escaneó
+  el pipeline de CI (`jruiz002/user-management-api:latest`) — no se reconstruye en el
+  servidor, así el artefacto que corre en producción es exactamente el que pasó los
+  gates de seguridad.
+- **Persistencia**: volumen nombrado de Docker (`uma-data`) montado en `/app/data`,
+  sobrevive a `docker stop`/`docker rm`/redeploys.
+- **Resiliencia mínima**: `--restart unless-stopped`, para que el contenedor se
+  recupere solo ante un reinicio de la instancia o un crash.
+- **Security Group**: `22` (SSH) restringido a la IP propia; `80` (HTTP, mapeado al
+  `3000` del contenedor) abierto públicamente para poder probar la API.
+
+```bash
+./scripts/deploy.sh ec2-user@<ip-publica> "/ruta/a/tu-key.pem"
+```
+
+**Verificado en vivo** (EC2 Amazon Linux 2023, `t2/t3.micro` free tier): `GET /health`,
+`POST /users` y `GET /users` respondiendo correctamente desde internet, contenedor en
+estado `healthy`, `docker logs` mostrando JSON estructurado, `--restart unless-stopped`
+confirmado. La IP es efímera (se libera al detener la instancia) y se omite aquí a
+propósito para no dejar un endpoint público sin autenticación referenciado de forma
+permanente en un repo de GitHub.
+
+## 12. Cómo correr el proyecto
 
 ```bash
 npm install
