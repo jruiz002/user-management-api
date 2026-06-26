@@ -104,6 +104,7 @@ User {
 | 6 | Logs | Fuga de datos sensibles | Bajo (no hay passwords en este sistema) | Logs estructurados, sin loguear bodies completos | Enmascarado de PII si se agrega auth |
 | 7 | Instancia EC2 | Acceso no autorizado | Medio | Security Group: solo 22 desde IP propia, puerto de la app público y mínimo | Bastion host / SSM Session Manager |
 | 8 | Disponibilidad | Sin rate limiting → abuso trivial | Bajo-Medio | Documentado como limitación | `express-rate-limit` |
+| 9 | Self-hosted runner (CD) en la EC2 | Si se compromete la cuenta de GitHub o el repo, el atacante puede modificar el workflow y ejecutar código arbitrario en la EC2 | Alto, pero acotado | Riesgo aceptado conscientemente: un solo desarrollador controla ambos lados (repo y EC2); runner corre como `ec2-user` (no root) | Runner efímero por job, runner dedicado en una EC2 separada sin acceso a otros recursos, branch protection en `main` |
 
 ## 8. Próximos pasos (fuera de esta iteración)
 
@@ -165,10 +166,9 @@ resolver el hallazgo. Re-escaneado, el gate pasa limpio (`exit-code 1` → `0`).
   seguro, y publicarlo. El scan de Trivy no es CI porque no valida código fuente,
   valida el paquete final — es el equivalente del `npm audit` pero para la imagen, y
   por eso vive dentro de "preparar la entrega", no dentro de "integrar código".
-- **Continuous *Deployment*** (un escalón más, que no está implementado en este
-  proyecto) sería automatizar lo que hoy hace `scripts/deploy.sh` a mano: que la EC2
-  reciba la señal, haga `pull` y levante el contenedor nuevo sin que nadie corra el
-  script. Se deja manual a propósito (ver sección [Deploy](#11-deploy-ec2)).
+- **Continuous *Deployment* = job `deploy`** (un escalón más allá de Delivery): la EC2
+  recibe la señal y se actualiza sola, sin que nadie corra un script a mano. Ver el
+  detalle de cómo, en la sección [Deploy](#11-deploy-ec2).
 
 **Por qué dos gates de seguridad distintos:** `npm audit` cubre vulnerabilidades en el
 código/dependencias fuente; Trivy cubre la imagen final (paquetes del SO de la imagen
@@ -186,13 +186,14 @@ es la mitigación estándar contra un ataque de supply-chain vía una Action com
 | `DOCKERHUB_USERNAME` | Usuario de Docker Hub |
 | `DOCKERHUB_TOKEN` | Access Token de Docker Hub (no la contraseña) |
 
-## 11. Deploy (EC2)
+## 11. Deploy (EC2) — Continuous Deployment
 
-Despliegue manual vía script SSH (`scripts/deploy.sh`), no Terraform — decisión de
-alcance documentada desde el [Plan](#1-alcance-scope), no un olvido.
+No Terraform — decisión de alcance documentada desde el [Plan](#1-alcance-scope), no
+un olvido. Pero el último salto (que la imagen nueva termine corriendo en la EC2) **sí
+está automatizado**, vía un self-hosted runner de GitHub Actions.
 
 - **Instancia**: EC2 Amazon Linux 2023, sin Docker preinstalado (se instaló como parte
-  de este despliegue: `dnf install docker`, `systemctl enable --now docker`).
+  del primer despliegue: `dnf install docker`, `systemctl enable --now docker`).
 - **Imagen**: se hace `docker pull` de la misma imagen pública que construyó y escaneó
   el pipeline de CI (`jruiz002/user-management-api:latest`) — no se reconstruye en el
   servidor, así el artefacto que corre en producción es exactamente el que pasó los
@@ -204,9 +205,45 @@ alcance documentada desde el [Plan](#1-alcance-scope), no un olvido.
 - **Security Group**: `22` (SSH) restringido a la IP propia; `80` (HTTP, mapeado al
   `3000` del contenedor) abierto públicamente para poder probar la API.
 
-```bash
-./scripts/deploy.sh ec2-user@<ip-publica> "/ruta/a/tu-key.pem"
+### Cómo se automatizó el último salto (job `deploy`)
+
+Se evaluaron tres formas de lograr que la EC2 se actualice sola, todas con trade-offs
+de seguridad distintos:
+
+| Opción | Cómo conecta GitHub con la EC2 | Por qué se descartó / eligió |
+|---|---|---|
+| SSH desde el runner de GitHub | GitHub Actions hace SSH hacia la EC2 | Requiere guardar la private key como secret y abrir el puerto 22 a los rangos de IP (dinámicos) de los runners de GitHub — descartado por superficie de exposición |
+| AWS SSM Run Command | GitHub llama a la API de AWS, SSM ejecuta el comando en la instancia | Cero puertos abiertos, pero requiere IAM role + credenciales de AWS como secret — más pasos de los que daba tiempo de configurar bien |
+| **Self-hosted runner en la propia EC2 (elegida)** | La EC2 hace *polling* saliente hacia GitHub (HTTPS, puerto 443) preguntando si hay trabajo — la conexión la inicia siempre la EC2, nunca GitHub | Cero secrets nuevos (ni SSH key ni AWS key), cero puertos abiertos. El trade-off: la EC2 puede ejecutar lo que sea que diga el workflow — aceptable porque ya controlamos ambos lados |
+
+Implementación: el runner (`actions-runner`, registrado como `ec2-uma`) corre como
+servicio `systemd`, como el usuario `ec2-user` (mismo usuario en el grupo `docker`, así
+no necesita `sudo` para los comandos de Docker). El job `deploy` en
+`.github/workflows/ci-cd.yml` corre con `runs-on: [self-hosted, ec2]` — eso significa
+"ejecútate en la EC2 misma", no en una VM de GitHub.
+
+```yaml
+deploy:
+  name: Deploy to EC2 (Continuous Deployment)
+  needs: build-scan-push
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  runs-on: [self-hosted, ec2]
+  steps:
+    - uses: actions/checkout@v4
+    - run: ./scripts/deploy-local.sh
 ```
+
+`scripts/deploy-local.sh` (corre EN la EC2, sin SSH) hace lo mismo que antes hacía
+`scripts/deploy.sh` por fuera: `docker pull` de `:latest`, para/elimina el contenedor
+viejo, levanta el nuevo con el mismo volumen y política de reinicio.
+
+`scripts/deploy.sh` (la versión SSH original) se conserva como mecanismo manual de
+respaldo — por ejemplo, si el runner se cae o para desplegar a una instancia distinta.
+
+**Verificado en vivo**: un `git push` a `main` dispara `test` → `build-scan-push` →
+`deploy`, y sin ninguna intervención manual, el contenedor en la EC2 termina corriendo
+con la imagen nueva (confirmado comparando `docker inspect -f '{{.State.StartedAt}}'`
+antes y después del push).
 
 **Verificado en vivo** (EC2 Amazon Linux 2023, `t2/t3.micro` free tier): `GET /health`,
 `POST /users` y `GET /users` respondiendo correctamente desde internet, contenedor en
